@@ -10,7 +10,6 @@ async function bootstrap() {
 
 	const logger = new Logger('Bootstrap');
 	const config = app.get(ConfigService);
-	console.log('test');
 
 	app.enableCors(getCorsConfig(config));
 	app.useGlobalPipes(new ValidationPipe());
