@@ -110,6 +110,7 @@ export function ms(str: StringValue): number {
 			return n;
 		default:
 			throw new Error(
+				// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
 				`Error: time measuring ${type} was recognized, but there is no such case. Please check your data.`
 			);
 	}
