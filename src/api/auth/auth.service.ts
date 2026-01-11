@@ -3,15 +3,16 @@ import {
 	Injectable,
 	InternalServerErrorException,
 	Logger,
+	NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
-import { hash } from 'argon2';
+import { hash, verify } from 'argon2';
 import { PrismaService } from 'infra/prisma/prisma.service';
 import { ms, StringValue } from 'libs/utils';
 
-import { RegisterDto } from './dto';
+import { LoginDto, RegisterDto } from './dto';
 import { JwtPayload } from './types';
 
 @Injectable()
@@ -32,6 +33,7 @@ export class AuthService {
 			'JWT_REFRESH_TOKEN_TTL'
 		);
 	}
+
 	public async registerUser({ email, password, name }: RegisterDto) {
 		const candidate = await this.prismaService.user.findUnique({
 			where: { email },
@@ -55,7 +57,21 @@ export class AuthService {
 			}
 		}
 	}
-	public async loginUser() {}
+	public async loginUser({ email, password }: LoginDto) {
+		const user = await this.prismaService.user.findUnique({
+			where: { email },
+		});
+		if (!user) {
+			throw new NotFoundException('Wrong auth data');
+		}
+
+		const isValidPassword = await verify(user.password, password);
+		if (!isValidPassword) {
+			throw new NotFoundException('Wrong auth data');
+		}
+
+		return await this.generateTokens(user);
+	}
 	public async logoutUser() {}
 
 	private async generateTokens({ id }: User) {
