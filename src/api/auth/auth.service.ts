@@ -9,8 +9,9 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
 import { hash, verify } from 'argon2';
+import { Response } from 'express';
 import { PrismaService } from 'infra/prisma/prisma.service';
-import { ms, StringValue } from 'libs/utils';
+import { isDev, ms, StringValue } from 'libs/utils';
 
 import { LoginDto, RegisterDto } from './dto';
 import { JwtPayload } from './types';
@@ -18,8 +19,11 @@ import { JwtPayload } from './types';
 @Injectable()
 export class AuthService {
 	private readonly logger = new Logger(AuthService.name);
+
 	private readonly JWT_ACCESS_TOKEN_TTL: StringValue;
 	private readonly JWT_REFRESH_TOKEN_TTL: StringValue;
+
+	private readonly COOKIE_DOMAIN: string;
 
 	constructor(
 		private readonly prismaService: PrismaService,
@@ -32,9 +36,14 @@ export class AuthService {
 		this.JWT_REFRESH_TOKEN_TTL = this.configService.getOrThrow<StringValue>(
 			'JWT_REFRESH_TOKEN_TTL'
 		);
+		this.COOKIE_DOMAIN =
+			this.configService.getOrThrow<string>('COOKIE_DOMAIN');
 	}
 
-	public async registerUser({ email, password, name }: RegisterDto) {
+	public async registerUser(
+		res: Response,
+		{ email, password, name }: RegisterDto
+	) {
 		const candidate = await this.prismaService.user.findUnique({
 			where: { email },
 		});
@@ -49,15 +58,14 @@ export class AuthService {
 						name,
 					},
 				});
-				const tokens = await this.generateTokens(newUser);
-				return tokens;
+				return this.authUser(res, newUser);
 			} catch (error) {
 				this.logger.error(error);
 				throw InternalServerErrorException;
 			}
 		}
 	}
-	public async loginUser({ email, password }: LoginDto) {
+	public async loginUser(res: Response, { email, password }: LoginDto) {
 		const user = await this.prismaService.user.findUnique({
 			where: { email },
 		});
@@ -70,9 +78,19 @@ export class AuthService {
 			throw new NotFoundException('Wrong auth data');
 		}
 
-		return await this.generateTokens(user);
+		return await this.authUser(res, user);
 	}
-	public async logoutUser() {}
+	//TODO delete token from DB
+	public logoutUser(res: Response) {
+		return this.setCookie(res, '', new Date(0));
+	}
+
+	private async authUser(res: Response, user: User) {
+		const { accessToken, refreshToken, refreshTokenExpires } =
+			await this.generateTokens(user);
+		this.setCookie(res, refreshToken, refreshTokenExpires);
+		return accessToken;
+	}
 
 	private async generateTokens({ id }: User) {
 		const payload: JwtPayload = {
@@ -98,5 +116,15 @@ export class AuthService {
 			refreshToken,
 			refreshTokenExpires,
 		};
+	}
+
+	private setCookie(response: Response, value: string, expires: Date) {
+		response.cookie('refreshToken', value, {
+			httpOnly: true,
+			domain: this.COOKIE_DOMAIN,
+			expires,
+			secure: !isDev(this.configService),
+			sameSite: 'lax',
+		});
 	}
 }
